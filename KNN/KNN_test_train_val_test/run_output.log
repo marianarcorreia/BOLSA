@@ -1,0 +1,92 @@
+[k selection] validation accuracy by k: {1: 0.796, 3: 0.8355, 5: 0.8485, 7: 0.866, 9: 0.874, 11: 0.877, 13: 0.878, 15: 0.879, 17: 0.877, 19: 0.8745, 21: 0.8755}
+[k selection] best k on validation: 15
+[k selection] cross-validation accuracy by k: {1: np.float64(0.7267448979591837), 3: np.float64(0.7421836734693877), 5: np.float64(0.7489642857142857), 7: np.float64(0.7533061224489795), 9: np.float64(0.7558010204081633), 11: np.float64(0.758), 13: np.float64(0.7597551020408163), 15: np.float64(0.7611938775510204), 17: np.float64(0.7619846938775511), 19: np.float64(0.7631275510204082), 21: np.float64(0.7637295918367346)}
+[k selection] best k on cross-validation: 21
+[k selection] best k on grid search: 21
+[k selection] best k on randomized search: 21
+[k selection] best k/accuracy by method: {'elbow': (15, 0.879), 'cross-validation': (21, np.float64(0.7637295918367346)), 'grid search': (21, np.float64(0.7637295918367346)), 'randomized search': (21, np.float64(0.7637295918367346))}
+[k selection] chosen method: elbow, chosen k: 15 (accuracy=0.879)
+[manual] train Accuracy: 0.8640867346938775
+[manual] train Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.87      0.96      0.91    142287
+           1       0.86      0.61      0.71     53713
+
+    accuracy                           0.86    196000
+   macro avg       0.86      0.78      0.81    196000
+weighted avg       0.86      0.86      0.86    196000
+
+[manual] train Confusion Matrix:
+[[136828   5459]
+ [ 21180  32533]]
+[sklearn] train Accuracy: 0.8640867346938775
+[sklearn] train Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.87      0.96      0.91    142287
+           1       0.86      0.61      0.71     53713
+
+    accuracy                           0.86    196000
+   macro avg       0.86      0.78      0.81    196000
+weighted avg       0.86      0.86      0.86    196000
+
+[sklearn] train Confusion Matrix:
+[[136828   5459]
+ [ 21180  32533]]
+[manual] validation Accuracy: 0.879
+[manual] validation Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.88      0.94      0.91      1333
+           1       0.87      0.75      0.81       667
+
+    accuracy                           0.88      2000
+   macro avg       0.88      0.85      0.86      2000
+weighted avg       0.88      0.88      0.88      2000
+
+[manual] validation Confusion Matrix:
+[[1256   77]
+ [ 165  502]]
+[sklearn] validation Accuracy: 0.879
+[sklearn] validation Classification Report:
+              precision    recall  f1-score   support
+
+           0       0.88      0.94      0.91      1333
+           1       0.87      0.75      0.81       667
+
+    accuracy                           0.88      2000
+   macro avg       0.88      0.85      0.86      2000
+weighted avg       0.88      0.88      0.88      2000
+
+[sklearn] validation Confusion Matrix:
+[[1256   77]
+ [ 165  502]]
+[manual] test Accuracy: 0.9905
+[manual] test Classification Report:
+              precision    recall  f1-score   support
+
+           0       1.00      0.98      0.99      1108
+           1       0.98      1.00      0.99       892
+
+    accuracy                           0.99      2000
+   macro avg       0.99      0.99      0.99      2000
+weighted avg       0.99      0.99      0.99      2000
+
+[manual] test Confusion Matrix:
+[[1089   19]
+ [   0  892]]
+[sklearn] test Accuracy: 0.9905
+[sklearn] test Classification Report:
+              precision    recall  f1-score   support
+
+           0       1.00      0.98      0.99      1108
+           1       0.98      1.00      0.99       892
+
+    accuracy                           0.99      2000
+   macro avg       0.99      0.99      0.99      2000
+weighted avg       0.99      0.99      0.99      2000
+
+[sklearn] test Confusion Matrix:
+[[1089   19]
+ [   0  892]]

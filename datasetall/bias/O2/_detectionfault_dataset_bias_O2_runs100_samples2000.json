@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "generated_at": "2026-08-21T16:20:45.493273",
+    "seed": 313548115368987918380794491534447604225,
+    "n_samples": 2000,
+    "n_runs": 100,
+    "n_no_fault_runs": 50,
+    "n_fault_runs": 50,
+    "forced_sensor": "O2",
+    "forced_fault_type": "bias",
+    "fault_types": [
+      "bias",
+      "drift",
+      "stuck",
+      "dropout",
+      "noise",
+      "spike"
+    ],
+    "sensors": [
+      "TEMP",
+      "O2",
+      "PRESSURE"
+    ],
+    "detection_rates": {
+      "n_runs": 100,
+      "n_fault_runs": 50,
+      "n_no_fault_runs": 50,
+      "rolling_detector_detection_rate": 0.56,
+      "fixed_baseline_detection_rate": 0.72,
+      "variance_detector_detection_rate": 0.0,
+      "rolling_detector_avg_false_alarms_per_no_fault_run": 0.02,
+      "fixed_baseline_avg_false_alarms_per_no_fault_run": 0.0,
+      "variance_detector_avg_false_alarms_per_no_fault_run": 0.0
+    }
+  }
+}

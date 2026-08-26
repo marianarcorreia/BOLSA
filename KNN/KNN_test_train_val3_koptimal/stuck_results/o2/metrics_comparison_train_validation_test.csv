@@ -1,0 +1,10 @@
+method,split,class,precision,recall,f1-score,support
+manual,test,Faulty,0.0,0.0,0.0,451.0
+manual,test,Not faulty,0.8813157894736842,0.9436460974922514,0.9114165192543203,3549.0
+manual,test,macro avg,0.4406578947368421,0.4718230487461257,0.45570825962716016,4000.0
+manual,train,Faulty,1.0,1.0,1.0,24926.0
+manual,train,Not faulty,1.0,1.0,1.0,67074.0
+manual,train,macro avg,1.0,1.0,1.0,92000.0
+manual,validation,Faulty,0.0,0.0,0.0,1274.0
+manual,validation,Not faulty,0.6704604242110709,0.9508437270726339,0.7864077669902912,2726.0
+manual,validation,macro avg,0.33523021210553544,0.47542186353631694,0.3932038834951456,4000.0
