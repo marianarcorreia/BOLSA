@@ -93,7 +93,7 @@ args = parse_args()
 k = args.k if args.k is not None else 3
 
 #1 -Load the dataset
-DATASET_PATH = Path(args.dataset) if args.dataset is not None else Path("C:\\Users\\maria\\OneDrive\\Desktop\\bolsa1\\KNN\\KNN_test_train_val3_koptimal\\datasets\\stuck_PRESSURE_appropriate_dataset_all_runs.json")
+DATASET_PATH = Path(args.dataset) if args.dataset is not None else Path("C:\\Users\\maria\\OneDrive\\Desktop\\bolsa1\\KNN\\KNN4_test\\datasets\\bias_TEMP_appropriate_dataset_all_runs_with_split.json")
 with open(DATASET_PATH) as f:
     dataset = pd.DataFrame(json.load(f))
 
@@ -726,9 +726,12 @@ plot_3d_scatter(
     legend_handles=_cluster_fault_legend_handles(CLUSTER_COLORS, FAULT_MARKERS, FAULT_LABELS),
 )
 
-def plot_3d_scatter_with_centers(X, Y, Z, colors, classifier, markers=None, centers=None, center_colors=None, cols=FEATURE_COLS,
-                             title="3D Scatter Plot of Sensor Readings with Cluster Centers", save_path=None,
-                             show=False, n_grid=15, scaler=None, legend_handles=None):
+# core boundary + scatter drawing, factored out of plot_3d_scatter_with_centers so
+# it can be reused per-subplot by plot_3d_scatter_with_centers_multi below (one
+# figure/legend/title shared across several splits' axes, instead of duplicating
+# the grid/predict/scatter logic per split)
+def _draw_3d_scatter_with_boundary(ax, X, Y, Z, colors, classifier, markers=None, centers=None, center_colors=None,
+                                    cols=FEATURE_COLS, n_grid=15, scaler=None):
     X = np.asarray(X, dtype=float)
     Y = np.asarray(Y, dtype=float)
     Z = np.asarray(Z, dtype=float)
@@ -755,8 +758,6 @@ def plot_3d_scatter_with_centers(X, Y, Z, colors, classifier, markers=None, cent
     preds = classifier.predict(grid_points)
     boundary_colors = np.where(preds == 1, "red", "green")
 
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection="3d")
     #faint voxel cloud showing the predicted class of the grid
     ax.scatter(xx.ravel(), yy.ravel(), zz.ravel(), c=boundary_colors, s=8, alpha=0.03, linewidths=0)
     #actual sensor readings on top: colour = neighbourhood, marker shape = fault status
@@ -770,8 +771,59 @@ def plot_3d_scatter_with_centers(X, Y, Z, colors, classifier, markers=None, cent
                        edgecolors="black", linewidths=0.5)
 
     _draw_centroids(ax, centers, center_colors, annotate=False)
+
+def plot_3d_scatter_with_centers(X, Y, Z, colors, classifier, markers=None, centers=None, center_colors=None, cols=FEATURE_COLS,
+                             title="3D Scatter Plot of Sensor Readings with Cluster Centers", save_path=None,
+                             show=False, n_grid=15, scaler=None, legend_handles=None):
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+    _draw_3d_scatter_with_boundary(ax, X, Y, Z, colors, classifier, markers=markers, centers=centers,
+                                    center_colors=center_colors, cols=cols, n_grid=n_grid, scaler=scaler)
     _apply_legend(ax, legend_handles)
     _finalize_3d_plot(fig, ax, cols, title, save_path, show)
+
+# same as plot_3d_scatter_with_centers, but draws several splits (e.g. test and
+# validation) as side-by-side 3D subplots in one figure/one PNG instead of one
+# file per split, so the same colour/marker encoding can be compared directly
+# without flipping between images. `panels` is a list of dicts with keys
+# label, X, Y, Z, colors, and optionally markers/centers/center_colors.
+def plot_3d_scatter_with_centers_multi(panels, classifier, cols=FEATURE_COLS, suptitle="",
+                                        save_path=None, show=False, n_grid=15, scaler=None,
+                                        legend_handles=None, return_image=False):
+    fig = plt.figure(figsize=(10 * len(panels), 8))
+    for i, panel in enumerate(panels):
+        ax = fig.add_subplot(1, len(panels), i + 1, projection="3d")
+        _draw_3d_scatter_with_boundary(ax, panel["X"], panel["Y"], panel["Z"], panel["colors"], classifier,
+                                        markers=panel.get("markers"), centers=panel.get("centers"),
+                                        center_colors=panel.get("center_colors"), cols=cols, n_grid=n_grid,
+                                        scaler=scaler)
+        ax.set_xlabel(str(FEATURE_LABELS.get(cols[0], cols[0])))
+        ax.set_ylabel(str(FEATURE_LABELS.get(cols[1], cols[1])))
+        ax.set_zlabel(str(FEATURE_LABELS.get(cols[2], cols[2])))
+        ax.set_title(panel["label"])
+        ax.grid(True)
+    if legend_handles:
+        fig.legend(handles=legend_handles, loc="lower center", ncol=min(len(legend_handles), 4))
+    fig.suptitle(suptitle)
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    # return_image renders in-memory instead of writing its own file, so callers
+    # (e.g. the by-neighbourhood/by-fault pair in section 10) can stitch several
+    # of these figures into one combined PNG rather than leaving them as
+    # separate files
+    if return_image:
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100)
+        plt.close(fig)
+        buf.seek(0)
+        return Image.open(buf).convert("RGB")
+    if save_path is None:
+        save_path = out_path(f"{suptitle.lower().replace(' ', '_').replace('(', '').replace(')', '').replace(',', '')}.png")
+    fig.savefig(save_path, dpi=100)
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return None
 
 # ===========================================================================
 # 10 - TEST & VALIDATION SET 3D DECISION BOUNDARIES (kept separate from the
@@ -805,42 +857,56 @@ eval_splits = {
     "validation": (X_validation, validation_mask),
 }
 classifiers = {
-    "sklearn": knn_model,
     "manual": manual_knn,
 }
 
-for split_name, (X_split, split_mask) in eval_splits.items():
-    split_cluster_colors = dataset_cluster_colors[split_mask]
-    split_fault_markers = dataset_fault_markers[split_mask]
-    split_fault_colors = dataset_fault_colors[split_mask]
+# one figure per classifier per encoding (neighbourhood / fault), with test and
+# validation side by side as subplots - instead of one file per
+# split-x-encoding combination, so the two splits can be compared directly
+for clf_name, clf in classifiers.items():
+    neighbourhood_panels = []
+    fault_panels = []
+    for split_name, (X_split, split_mask) in eval_splits.items():
+        split_cluster_colors = dataset_cluster_colors[split_mask]
+        split_fault_markers = dataset_fault_markers[split_mask]
+        split_fault_colors = dataset_fault_colors[split_mask]
 
-    for clf_name, clf in classifiers.items():
-        plot_3d_scatter_with_centers(
-            X_split[FEATURE_COLS[0]],
-            X_split[FEATURE_COLS[1]],
-            X_split[FEATURE_COLS[2]],
-            split_cluster_colors,
-            clf,
-            markers=split_fault_markers,
-            cols=FEATURE_COLS,
-            title=f"3D Scatter Plot of {split_name.capitalize()} Set with Decision Boundary ({clf_name} KNN, colour = neighbourhood, marker = fault status)",
-            save_path=out_path(f"3d_scatter_plot_{split_name}_{clf_name}_by_neighbourhood.png"),
-            scaler=scaler,
-            legend_handles=cluster_fault_legend,
-        )
+        neighbourhood_panels.append({
+            "label": f"{split_name.capitalize()} Set",
+            "X": X_split[FEATURE_COLS[0]], "Y": X_split[FEATURE_COLS[1]], "Z": X_split[FEATURE_COLS[2]],
+            "colors": split_cluster_colors, "markers": split_fault_markers,
+        })
+        fault_panels.append({
+            "label": f"{split_name.capitalize()} Set",
+            "X": X_split[FEATURE_COLS[0]], "Y": X_split[FEATURE_COLS[1]], "Z": X_split[FEATURE_COLS[2]],
+            "colors": split_fault_colors,
+        })
 
-        plot_3d_scatter_with_centers(
-            X_split[FEATURE_COLS[0]],
-            X_split[FEATURE_COLS[1]],
-            X_split[FEATURE_COLS[2]],
-            split_fault_colors,
-            clf,
-            cols=FEATURE_COLS,
-            title=f"3D Scatter Plot of {split_name.capitalize()} Set with Decision Boundary ({clf_name} KNN, colour = fault status)",
-            save_path=out_path(f"3d_scatter_plot_{split_name}_{clf_name}_by_fault.png"),
-            scaler=scaler,
-            legend_handles=fault_color_legend,
-        )
+    # render the by-neighbourhood and by-fault rows in-memory, then stack them
+    # into a single PNG (one image per classifier covering both splits and
+    # both colour encodings) instead of leaving them as two separate files
+    neighbourhood_row = plot_3d_scatter_with_centers_multi(
+        neighbourhood_panels, clf, cols=FEATURE_COLS,
+        suptitle=f"3D Scatter Plot of Test vs Validation Sets with Decision Boundary ({clf_name} KNN, colour = neighbourhood, marker = fault status)",
+        scaler=scaler,
+        legend_handles=cluster_fault_legend,
+        return_image=True,
+    )
+
+    fault_row = plot_3d_scatter_with_centers_multi(
+        fault_panels, clf, cols=FEATURE_COLS,
+        suptitle=f"3D Scatter Plot of Test vs Validation Sets with Decision Boundary ({clf_name} KNN, colour = fault status)",
+        scaler=scaler,
+        legend_handles=fault_color_legend,
+        return_image=True,
+    )
+
+    if neighbourhood_row is not None and fault_row is not None:
+        combined_width = max(neighbourhood_row.width, fault_row.width)
+        combined = Image.new("RGB", (combined_width, neighbourhood_row.height + fault_row.height), "white")
+        combined.paste(neighbourhood_row, (0, 0))
+        combined.paste(fault_row, (0, neighbourhood_row.height))
+        combined.save(out_path(f"3d_scatter_plot_test_validation_{clf_name}.png"))
 
 #11 - Save everything this run printed (data split summary, k selection,
 #accuracy/metrics tables, neighbourhood breakdowns, ...) as one PNG in

@@ -540,10 +540,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=200,
                         help="Total number of random trials to generate, split 50/50 into "
                              "no_fault/fault (default: 200). Val and test are each held to a "
-                             "fixed 1 run per group (2 runs each, regardless of --runs) as a small "
-                             "sanity check; everything else goes to train. See assign_split()")
+                             "fixed size per group (see --val-runs/--test-runs), regardless of "
+                             "--runs; everything else goes to train. See assign_split()")
     parser.add_argument("--samples", type=int, default=1000,
                         help="Number of samples per run (default: 1000)")
+    parser.add_argument("--val-runs", dest="val_runs", type=int, default=1,
+                        help="Val runs per group (no_fault/fault), so total val runs = "
+                             "2x this value (default: 1, i.e. 2 runs total)")
+    parser.add_argument("--test-runs", dest="test_runs", type=int, default=1,
+                        help="Test runs per group (no_fault/fault), so total test runs = "
+                             "2x this value (default: 1, i.e. 2 runs total)")
     return parser.parse_args()
 
 #run
@@ -553,6 +559,8 @@ if __name__ == "__main__":
     N_SAMPLES = args.samples
     N_RUNS = args.runs            #TOTAL trials across all splits, 50/50 no_fault/fault
     TOTAL_RUNS = N_RUNS            #passed to assign_split, which carves fixed-size val/test off the tail and gives the rest to train
+    VAL_RUNS_PER_GROUP = args.val_runs
+    TEST_RUNS_PER_GROUP = args.test_runs
     SAVE_SIGNALS = True           #include full time series in the dataset (bigger file)
     #None -> random sensor picked per trial; "ALL" -> round-robin through every sensor
     SENSOR_NAME = None if args.sensor == "ALL" else args.sensor
@@ -569,15 +577,15 @@ if __name__ == "__main__":
     t, temp_true, o2_true, pressure_true = simulate_process(n_samples=N_SAMPLES, dt=1.0)
 
     #--- batch of random trials -> labeled dataset, split train/val/test x no_fault/fault ---
-    #run_id order within the no_fault half [0, half): train, then 1 val run,
-    #then 1 test run. Same pattern in the fault half [half, TOTAL_RUNS).
-    #Val and test are fixed at 1 run per group regardless of TOTAL_RUNS;
-    #train gets everything else. See assign_split().
+    #run_id order within the no_fault half [0, half): train, then VAL_RUNS_PER_GROUP val runs,
+    #then TEST_RUNS_PER_GROUP test runs. Same pattern in the fault half [half, TOTAL_RUNS).
+    #Val and test are fixed sizes regardless of TOTAL_RUNS; train gets everything else.
+    #See assign_split().
     records = []
     for run_id in range(TOTAL_RUNS):
         trial_rng = np.random.default_rng(master_rng.integers(0, 2**63))
         run_sensor = SENSOR_CYCLE[run_id % len(SENSOR_CYCLE)] if SENSOR_CYCLE else SENSOR_NAME
-        split, group = assign_split(run_id, TOTAL_RUNS)
+        split, group = assign_split(run_id, TOTAL_RUNS, VAL_RUNS_PER_GROUP, TEST_RUNS_PER_GROUP)
         #no_fault quarters get FaultType.NONE forced regardless of --fault-type;
         #fault quarters use whatever the caller asked for (or random, if nothing was forced)
         run_fault_type = FaultType.NONE if group == "no_fault" else FAULT_TYPE_ARG
@@ -608,7 +616,7 @@ if __name__ == "__main__":
 
     sensor_tag = "ALL" if SENSOR_CYCLE else (SENSOR_NAME or "random")
     fault_tag = FAULT_TYPE_ARG.value if FAULT_TYPE_ARG else "random"
-    out_dir = f"test_train_val_test/{fault_tag}/{sensor_tag}"
+    out_dir = f"knn5/{fault_tag}/{sensor_tag}"
     os.makedirs(out_dir, exist_ok=True)
 
     for split in ("train", "val", "test"):
