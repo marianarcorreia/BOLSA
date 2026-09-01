@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import precision_score, recall_score, f1_score, homogeneity_score, rand_score, v_measure_score, mutual_info_score
 from scipy.spatial.distance import cdist
 import seaborn as sns
 from sklearn.svm import SVC
@@ -42,8 +43,22 @@ def plot_classification_report(y_true, y_pred, save_path=None):
 # so the diagnostics stay identical across them and are easy to compare.
 def evaluate_predictions(method_label, split_label, y_true, y_pred):
     acc = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    homogeneity = homogeneity_score(y_true, y_pred)
+    mutual_info = mutual_info_score(y_true, y_pred)
+    rand = rand_score(y_true, y_pred)
+    v_measure = v_measure_score(y_true, y_pred)
     report_dict = classification_report(y_true, y_pred, output_dict=True)
     print(f"[{method_label}] {split_label} Accuracy: {acc}")
+    print(f"[{method_label}] {split_label} Precision: {precision}")
+    print(f"[{method_label}] {split_label} Recall: {recall}")
+    print(f"[{method_label}] {split_label} F1 Score: {f1}")
+    print(f"[{method_label}] {split_label} Homogeneity: {homogeneity}")
+    print(f"[{method_label}] {split_label} Mutual Information: {mutual_info}")
+    print(f"[{method_label}] {split_label} Rand Index: {rand}")
+    print(f"[{method_label}] {split_label} V-Measure: {v_measure}")
     print(f"[{method_label}] {split_label} Classification Report:\n{classification_report(y_true, y_pred)}")
     plot_classification_report(y_true, y_pred, save_path=out_path(f"classification_report_{method_label}_{split_label}.png"))
 
@@ -442,8 +457,10 @@ splits = {
 
 accuracies = {"manual": {}}
 reports = {"manual": {}}
+predictions = {"manual": {}}
 for split_name, (X_split, y_split) in splits.items():
     manual_preds = manual_knn.predict(X_split)
+    predictions["manual"][split_name] = manual_preds
     accuracies["manual"][split_name], reports["manual"][split_name] = evaluate_predictions("manual", split_name, y_split, manual_preds)
 
     #sklearn_preds = knn_model.predict(X_split)
@@ -908,7 +925,73 @@ for clf_name, clf in classifiers.items():
         combined.paste(fault_row, (0, neighbourhood_row.height))
         combined.save(out_path(f"3d_scatter_plot_test_validation_{clf_name}.png"))
 
-#11 - Save everything this run printed (data split summary, k selection,
+#11 - Per-sample classification scatter: unlike the 3D scatters above (feature
+#vs feature vs feature), this plots each sensor variable on its own axis
+#against sample position within the split, so misclassifications can be read
+#off sample-by-sample instead of only as an aggregate accuracy number.
+#Per point: marker shape = true fault status (same as FAULT_MARKERS
+#elsewhere), fill colour = KMeans neighbourhood (same as CLUSTER_COLORS), and
+#edge colour = whether the classifier's prediction matched the true label
+#(black = correct, red = misclassified) - so all three pieces of information
+#that matter for diagnosing a wrong prediction (which variable, which
+#neighbourhood, which fault group) are visible in one plot.
+def _correctness_legend_handles():
+    return [
+        Line2D([0], [0], marker="o", linestyle="", markerfacecolor="none", markeredgecolor="black",
+               markeredgewidth=1.5, markersize=9, label="Correctly classified"),
+        Line2D([0], [0], marker="o", linestyle="", markerfacecolor="none", markeredgecolor="red",
+               markeredgewidth=1.5, markersize=9, label="Misclassified"),
+    ]
+
+def plot_sample_classification_scatter(X_split, y_true, y_pred, cluster_colors, fault_markers,
+                                        cols=FEATURE_COLS, suptitle="", save_path=None, legend_handles=None):
+    x_idx = np.arange(len(X_split))
+    correct = np.asarray(y_true) == np.asarray(y_pred)
+    edge_colors = np.where(correct, "black", "red")
+    edge_widths = np.where(correct, 0.6, 1.8)
+    marker_arr = np.asarray(fault_markers)
+    color_arr = np.asarray(cluster_colors)
+
+    fig, axes = plt.subplots(len(cols), 1, figsize=(14, 3.2 * len(cols)), sharex=True)
+    if len(cols) == 1:
+        axes = [axes]
+    for ax, col in zip(axes, cols):
+        y_vals = X_split[col].to_numpy(dtype=float)
+        # misclassified points drawn last (on top) within each marker group so
+        # a red-edged error is never hidden under a correctly-classified point
+        for marker in np.unique(marker_arr):
+            mask = marker_arr == marker
+            for is_correct in (True, False):
+                sub = mask & (correct == is_correct)
+                if not sub.any():
+                    continue
+                ax.scatter(x_idx[sub], y_vals[sub], c=color_arr[sub], marker=marker, s=35,
+                           edgecolors=edge_colors[sub], linewidths=edge_widths[sub], zorder=1 if is_correct else 2)
+        ax.set_ylabel(str(FEATURE_LABELS.get(col, col)))
+        ax.grid(True, alpha=0.3)
+    axes[-1].set_xlabel("Sample index (within split)")
+
+    if legend_handles:
+        fig.legend(handles=legend_handles, loc="lower center", ncol=min(len(legend_handles), 4), fontsize=8)
+    fig.suptitle(suptitle)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    if save_path is None:
+        save_path = out_path(f"{suptitle.lower().replace(' ', '_').replace('(', '').replace(')', '').replace(',', '')}.png")
+    fig.savefig(save_path, dpi=100)
+    plt.close(fig)
+
+sample_scatter_legend = cluster_fault_legend + _correctness_legend_handles()
+for clf_name in classifiers:
+    for split_name, (X_split, split_mask) in eval_splits.items():
+        plot_sample_classification_scatter(
+            X_split, fault[split_mask], predictions[clf_name][split_name],
+            dataset_cluster_colors[split_mask], dataset_fault_markers[split_mask],
+            cols=FEATURE_COLS,
+            suptitle=f"Per-Sample Classification Scatter ({split_name.capitalize()} Set, {clf_name} KNN)",
+            legend_handles=sample_scatter_legend,
+        )
+
+#12 - Save everything this run printed (data split summary, k selection,
 #accuracy/metrics tables, neighbourhood breakdowns, ...) as one PNG in
 #RESULTS_DIR, so it stays alongside the plots/CSVs instead of only living in
 #terminal scrollback

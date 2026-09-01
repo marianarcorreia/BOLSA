@@ -7,6 +7,7 @@ from zipfile import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.transforms import blended_transform_factory
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -444,21 +445,22 @@ def detect_noise_fault(signal, window: int = 20, ref_window: int = 100,
 #background color per split, used so a glance at the PNG says which stretch is which
 SPLIT_BG = {"train": "#eaf3fb", "val": "#eafbea", "test": "#fdf0e6"}  #light blue / light green / light peach
 
-def plot_illustrative_examples(split_records: dict, n_samples: int, out_path: str) -> Optional[str]:
-    """Plot one train-split trial and one test-split trial back-to-back on the
-    SAME axes per signal -- train stretch shaded light blue, test stretch
-    shaded light peach (via axvspan), divided by a solid vertical line -- so
-    a single graph shows what "training data" vs "test data" looks like.
-    `split_records` maps "train"/"val"/"test" -> record dict (with `signals`
-    populated); a split with no record available is simply skipped."""
+_ROW_LABELS = {"TEMP": "Furnace Temperature", "O2": "Flue-gas O2", "PRESSURE": "Furnace Draft Pressure"}
+_ROW_YLABELS = {"TEMP": "Temp (°C)", "O2": "O2 (%)", "PRESSURE": "Pressure (Pa)"}
+_ROW_COLORS = {"TEMP": "#d62728", "O2": "#1f77b4", "PRESSURE": "#2ca02c"}
+_ROW_ORDER = ["TEMP", "O2", "PRESSURE"]
+
+
+def _build_illustrative_segments(split_records: dict, n_samples: int):
+    """Lay each available split's trial end to end on one x-axis and run the
+    three detectors on its faulty sensor. `split_records` maps
+    "train"/"val"/"test" -> record dict (with `signals` populated); a split
+    with no record available is simply skipped. Shared by both the full
+    (3-row) and faulty-sensor-only illustrative plots so the detectors only
+    run once and diagnostics only print once."""
     order = [s for s in ("train", "val", "test") if split_records.get(s) is not None]
     if not order:
-        return None
-
-    row_labels = ["Furnace Temperature", "Flue-gas O2", "Furnace Draft Pressure"]
-    row_ylabels = ["Temp (°C)", "O2 (%)", "Pressure (Pa)"]
-    row_colors = ["#d62728", "#1f77b4", "#2ca02c"]
-    row_keys = ["TEMP", "O2", "PRESSURE"]
+        return order, [], 0
 
     #build one continuous x-axis by laying each split's samples end to end
     segments = []  #(split, x_start, x_end, record, faulty_signal, flags_roll, residual_roll, flags_fixed, residual_fixed)
@@ -496,37 +498,89 @@ def plot_illustrative_examples(split_records: dict, n_samples: int, out_path: st
         })
         offset += n_samples
 
-    fig, axes = plt.subplots(3, 1, figsize=(6 + 5 * len(order), 9), sharex=True)
+    return order, segments, offset
+
+
+def _render_illustrative_plot(order, segments, offset, n_samples, row_keys, title, out_path) -> str:
+    """Render `row_keys` (a subset/ordering of TEMP/O2/PRESSURE) from
+    already-built `segments` into a single PNG at `out_path`."""
+    n_rows = len(row_keys)
+    #reserve a FIXED number of inches at the top for the suptitle + split
+    #labels (rather than a fixed fraction of the figure), so that a 1-row
+    #faulty-only plot doesn't cramp/overlap that text the way it would if
+    #the header area shrank along with the plot area
+    header_in = 0.75
+    row_in = 3.4
+    fig_height = row_in * n_rows + header_in
+    fig, axes = plt.subplots(n_rows, 1, figsize=(6 + 5 * len(order), fig_height), sharex=True, squeeze=False)
+    axes = axes[:, 0]
 
     for ax in axes:
         for seg in segments:
             ax.axvspan(seg["offset"], seg["offset"] + n_samples, color=SPLIT_BG[seg["split"]], zorder=0)
         for boundary in range(n_samples, offset, n_samples):
             ax.axvline(boundary, color="k", lw=1.5, alpha=0.8)
+        ax.grid(axis="y", color="gray", alpha=0.25, lw=0.6, zorder=0.5)
+        ax.tick_params(labelsize=10)
 
     for row, key in enumerate(row_keys):
         for seg in segments:
             x = np.arange(n_samples) + seg["offset"]
             y = np.array(seg["record"]["signals"][key])
-            axes[row].plot(x, y, color=row_colors[row], lw=1)
-            axes[row].axvline(seg["fault_start_abs"], color="k", ls="--", lw=1, alpha=0.6)
-        axes[row].set_ylabel(row_ylabels[row])
-        axes[row].set_title(row_labels[row])
+            axes[row].plot(x, y, color=_ROW_COLORS[key], lw=1.3, zorder=2)
+            #only mark fault onset on the row for the sensor that actually faulted in this segment
+            if seg["faulty_sensor"] == key:
+                axes[row].axvline(seg["fault_start_abs"], color="#333333", ls="--", lw=1.8, alpha=0.9, zorder=3)
+        axes[row].set_ylabel(_ROW_YLABELS[key], fontsize=11)
+        axes[row].set_title(_ROW_LABELS[key], fontsize=12, fontweight="bold")
 
-    axes[-1].set_xlabel("Sample index")
+    axes[-1].set_xlabel("Sample index", fontsize=11)
 
+    #split labels: x follows axes[0]'s data columns (axes-fraction) so they
+    #stay aligned with the split boundaries, but y is figure-fraction, a
+    #fixed distance below the top edge, so they land in the reserved
+    #header_in strip regardless of n_rows/fig_height
+    label_trans = blended_transform_factory(axes[0].transAxes, fig.transFigure)
     for i, seg in enumerate(segments):
         mid = (i + 0.5) / len(segments)
-        axes[0].text(mid, 1.18, f"{seg['split'].upper()} SPLIT", transform=axes[0].transAxes,
-                     ha="center", fontsize=12, fontweight="bold")
+        fig.text(mid, 1 - 0.4 / fig_height, f"{seg['split'].upper()} SPLIT",
+                 transform=label_trans, ha="center", va="top", fontsize=13, fontweight="bold")
 
-    fig.suptitle("Illustrative example: training data vs. test data", fontsize=13, fontweight="bold")
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    fig.suptitle(title, fontsize=15, fontweight="bold", y=1 - 0.1 / fig_height, verticalalignment="top")
+    fig.tight_layout(rect=(0, 0, 1, 1 - header_in / fig_height))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, dpi=300)
     plt.close(fig)
-    print(f"Saved combined {'/'.join(order)} example figure to {out_path}")
+    print(f"Saved {'/'.join(order)} example figure ({', '.join(row_keys)}) to {out_path}")
     return out_path
+
+
+def plot_illustrative_examples(split_records: dict, n_samples: int, out_path: str) -> Optional[str]:
+    """Plot one train-split trial, one val-split trial, and one test-split
+    trial back-to-back on the SAME axes per signal -- train stretch shaded
+    light blue, val light green, test light peach (via axvspan), divided by
+    a solid vertical line -- so a single graph shows what "training data" vs
+    "test data" looks like. `split_records` maps "train"/"val"/"test" ->
+    record dict (with `signals` populated); a split with no record available
+    is simply skipped."""
+    order, segments, offset = _build_illustrative_segments(split_records, n_samples)
+    if not order:
+        return None
+    return _render_illustrative_plot(order, segments, offset, n_samples, _ROW_ORDER,
+                                      "Illustrative example: training data vs. test data", out_path)
+
+
+def plot_illustrative_faulty_only(split_records: dict, n_samples: int, out_path: str) -> Optional[str]:
+    """Same layout as plot_illustrative_examples, but only plots the row(s)
+    for the sensor(s) that actually carried the injected fault in at least
+    one segment -- so the faulty signal isn't lost among the two healthy
+    ones."""
+    order, segments, offset = _build_illustrative_segments(split_records, n_samples)
+    if not order:
+        return None
+    faulty_keys = [k for k in _ROW_ORDER if any(seg["faulty_sensor"] == k for seg in segments)]
+    return _render_illustrative_plot(order, segments, offset, n_samples, faulty_keys,
+                                      "Illustrative example: faulty sensor only", out_path)
 
 #args to choose sensor and fault type from command line
 def parse_args() -> argparse.Namespace:
@@ -616,7 +670,7 @@ if __name__ == "__main__":
 
     sensor_tag = "ALL" if SENSOR_CYCLE else (SENSOR_NAME or "random")
     fault_tag = FAULT_TYPE_ARG.value if FAULT_TYPE_ARG else "random"
-    out_dir = f"knn5/{fault_tag}/{sensor_tag}"
+    out_dir = f"knn6_data/{fault_tag}/{sensor_tag}"
     os.makedirs(out_dir, exist_ok=True)
 
     for split in ("train", "val", "test"):
@@ -695,3 +749,5 @@ if __name__ == "__main__":
     split_examples = {split: pick_example(split) for split in ("train", "val", "test")}
     example_out_path = f"{out_dir}/illustrative_{fault_tag}_{sensor_tag}.png"
     plot_illustrative_examples(split_examples, N_SAMPLES, example_out_path)
+    faulty_only_out_path = f"{out_dir}/illustrative_faulty_only_{fault_tag}_{sensor_tag}.png"
+    plot_illustrative_faulty_only(split_examples, N_SAMPLES, faulty_only_out_path)
