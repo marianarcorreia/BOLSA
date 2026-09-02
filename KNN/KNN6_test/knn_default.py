@@ -112,7 +112,7 @@ args = parse_args()
 k = args.k if args.k is not None else 3
 
 #1 -Load the dataset
-DATASET_PATH = Path(args.dataset) if args.dataset is not None else Path("C:\\Users\\maria\\OneDrive\\Desktop\\bolsa1\\KNN\\KNN6_test\\datasets\\drift_TEMP_appropriate_dataset_all_runs.json")
+DATASET_PATH = Path(args.dataset) if args.dataset is not None else Path("C:\\Users\\maria\\OneDrive\\Desktop\\bolsa1\\KNN\\KNN6_test\\datasets\\noise_PRESSURE_appropriate_dataset_all_runs.json")
 with open(DATASET_PATH) as f:
     dataset = pd.DataFrame(json.load(f))
 
